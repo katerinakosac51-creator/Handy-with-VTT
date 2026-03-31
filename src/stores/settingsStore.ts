@@ -155,6 +155,12 @@ const settingUpdaters: {
     commands.changeWhisperGpuDevice(value as number),
   extra_recording_buffer_ms: (value) =>
     commands.changeExtraRecordingBufferSetting(value as number),
+  wake_word_enabled: (value) =>
+    commands.changeWakeWordEnabled(value as boolean),
+  wake_word_phrase: (value) =>
+    commands.changeWakeWordPhrase(value as string),
+  wake_word_stop_phrase: (value) =>
+    commands.changeWakeWordStopPhrase(value as string),
 };
 
 export const useSettingsStore = create<SettingsStore>()(

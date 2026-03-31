@@ -298,8 +298,57 @@ fn type_text_via_wtype(text: &str) -> Result<(), String> {
 }
 
 /// Type text directly via xdotool on X11.
+///
+/// `xdotool type` maps characters to keysyms using the active X11 keyboard
+/// layout. Non-ASCII characters (e.g. Cyrillic, Ukrainian, Arabic) are not
+/// present in typical English layouts, so xdotool outputs a space for each
+/// unmapped character.  We detect non-ASCII text and switch to
+/// `xdotool key Uxxxx` — Unicode keysym notation — which X11 handles via
+/// XChangeKeyboardMapping and works regardless of the active layout.
 #[cfg(target_os = "linux")]
 fn type_text_via_xdotool(text: &str) -> Result<(), String> {
+    let has_non_ascii = text.chars().any(|c| !c.is_ascii());
+
+    if has_non_ascii {
+        // Build a list of Unicode keysyms, one per character.
+        // xdotool key accepts multiple keysyms in one invocation and presses
+        // them in sequence, bypassing the keyboard layout entirely.
+        let keysyms: Vec<String> = text
+            .chars()
+            .filter_map(|c| {
+                if c.is_control() {
+                    // Pass through newline as Return; drop other control chars.
+                    if c == '\n' {
+                        Some("Return".to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(format!("U{:04X}", c as u32))
+                }
+            })
+            .collect();
+
+        if keysyms.is_empty() {
+            return Ok(());
+        }
+
+        let output = Command::new("xdotool")
+            .arg("key")
+            .arg("--clearmodifiers")
+            .args(&keysyms)
+            .output()
+            .map_err(|e| format!("Failed to execute xdotool: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("xdotool failed: {}", stderr));
+        }
+
+        return Ok(());
+    }
+
+    // ASCII-only path: `xdotool type` is fine here.
     let output = Command::new("xdotool")
         .arg("type")
         .arg("--clearmodifiers")

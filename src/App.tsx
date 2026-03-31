@@ -142,6 +142,16 @@ function App() {
     };
   }, [t]);
 
+  // Show a brief toast when the wake word is detected
+  useEffect(() => {
+    const unlisten = listen("wake-word-detected", () => {
+      toast.info(t("settings.advanced.wakeWord.detected"), { duration: 2000 });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
   const revealMainWindowForPermissions = async () => {
     try {
       await commands.showMainWindowCommand();

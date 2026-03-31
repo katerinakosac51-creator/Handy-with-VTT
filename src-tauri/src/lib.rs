@@ -30,6 +30,7 @@ use managers::audio::AudioRecordingManager;
 use managers::history::HistoryManager;
 use managers::model::ModelManager;
 use managers::transcription::TranscriptionManager;
+use managers::wake_word::WakeWordManager;
 #[cfg(unix)]
 use signal_hook::consts::{SIGUSR1, SIGUSR2};
 #[cfg(unix)]
@@ -155,6 +156,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     );
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
+    let wake_word_manager = Arc::new(WakeWordManager::new(app_handle));
 
     // Apply accelerator preferences before any model loads
     managers::transcription::apply_accelerator_settings(app_handle);
@@ -164,6 +166,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(wake_word_manager.clone());
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
@@ -262,6 +265,11 @@ fn initialize_core_logic(app_handle: &AppHandle) {
         .build(app_handle)
         .unwrap();
     app_handle.manage(tray);
+
+    // Start wake-word listener if the setting is already enabled.
+    // Must be after app_handle.manage(tray) — the listener thread calls
+    // change_tray_icon() which requires TrayIcon to be in managed state.
+    wake_word_manager.sync_with_settings();
 
     // Initialize tray menu with idle state
     utils::update_tray_menu(app_handle, &utils::TrayIconState::Idle, None);
@@ -415,6 +423,10 @@ pub fn run(cli_args: CliArgs) {
             commands::audio::set_clamshell_microphone,
             commands::audio::get_clamshell_microphone,
             commands::audio::is_recording,
+            commands::audio::change_wake_word_enabled,
+            commands::audio::change_wake_word_phrase,
+            commands::audio::change_wake_word_stop_phrase,
+            commands::audio::reset_microphone_settings,
             commands::transcription::set_model_unload_timeout,
             commands::transcription::get_model_load_status,
             commands::transcription::unload_model_manually,
@@ -599,6 +611,18 @@ pub fn run(cli_args: CliArgs) {
             if let tauri::RunEvent::Reopen { .. } = &event {
                 show_main_window(app);
             }
-            let _ = (app, event); // suppress unused warnings on non-macOS
+            // Cleanup on app exit
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                // Stop wake word listener
+                if let Some(wwm) = app.try_state::<Arc<WakeWordManager>>() {
+                    wwm.stop();
+                }
+                // Stop microphone stream
+                if let Some(rm) = app.try_state::<Arc<AudioRecordingManager>>() {
+                    rm.stop_microphone_stream();
+                }
+                let _ = api; // suppress unused warnings
+            }
+            let _ = app; // suppress unused warnings on non-macOS
         });
 }

@@ -1,6 +1,7 @@
 use crate::audio_feedback;
 use crate::audio_toolkit::audio::{list_input_devices, list_output_devices};
 use crate::managers::audio::{AudioRecordingManager, MicrophoneMode};
+use crate::managers::wake_word::WakeWordManager;
 use crate::settings::{get_settings, write_settings};
 use log::warn;
 use serde::{Deserialize, Serialize};
@@ -166,7 +167,12 @@ pub fn update_microphone_mode(app: AppHandle, always_on: bool) -> Result<(), Str
     };
 
     rm.update_mode(new_mode)
-        .map_err(|e| format!("Failed to update microphone mode: {}", e))
+        .map_err(|e| format!("Failed to update microphone mode: {}", e))?;
+
+    // Sync wake word manager with new settings (it requires always_on_microphone)
+    app.state::<Arc<WakeWordManager>>().sync_with_settings();
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -309,4 +315,66 @@ pub fn get_clamshell_microphone(app: AppHandle) -> Result<String, String> {
 pub fn is_recording(app: AppHandle) -> bool {
     let audio_manager = app.state::<Arc<AudioRecordingManager>>();
     audio_manager.is_recording()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_wake_word_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mut settings = get_settings(&app);
+    settings.wake_word_enabled = enabled;
+    write_settings(&app, settings);
+    app.state::<Arc<WakeWordManager>>().sync_with_settings();
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_wake_word_phrase(app: AppHandle, phrase: String) -> Result<(), String> {
+    let mut settings = get_settings(&app);
+    settings.wake_word_phrase = phrase;
+    write_settings(&app, settings);
+    // Note: WakeWordManager reads settings fresh each iteration, so no sync needed
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_wake_word_stop_phrase(app: AppHandle, stop_phrase: String) -> Result<(), String> {
+    let mut settings = get_settings(&app);
+    settings.wake_word_stop_phrase = stop_phrase;
+    write_settings(&app, settings);
+    // Note: WakeWordManager reads settings fresh each iteration, so no sync needed
+    Ok(())
+}
+
+/// Reset all microphone-related settings to their defaults.
+/// This disables always-on microphone, wake word detection, and clears
+/// selected microphone preferences. Useful for troubleshooting audio issues.
+#[tauri::command]
+#[specta::specta]
+pub fn reset_microphone_settings(app: AppHandle) -> Result<(), String> {
+    let mut settings = get_settings(&app);
+
+    // Reset microphone settings to defaults
+    settings.always_on_microphone = false;
+    settings.selected_microphone = None;
+    settings.clamshell_microphone = None;
+    settings.mute_while_recording = false;
+    settings.lazy_stream_close = false;
+    settings.wake_word_enabled = false;
+    settings.wake_word_phrase = "hey handy".to_string();
+    settings.wake_word_stop_phrase = "stop recording".to_string();
+    settings.audio_feedback = false;
+
+    write_settings(&app, settings);
+
+    // Update the audio manager mode
+    let rm = app.state::<Arc<AudioRecordingManager>>();
+    rm.update_mode(MicrophoneMode::OnDemand)
+        .map_err(|e| format!("Failed to update microphone mode: {}", e))?;
+
+    // Stop wake word manager
+    app.state::<Arc<WakeWordManager>>().stop();
+
+    Ok(())
 }

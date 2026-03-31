@@ -187,11 +187,9 @@ impl Default for ModelUnloadTimeout {
 
 impl Default for PasteMethod {
     fn default() -> Self {
-        // Default to CtrlV for macOS and Windows, Direct for Linux
-        #[cfg(target_os = "linux")]
-        return PasteMethod::Direct;
-        #[cfg(not(target_os = "linux"))]
-        return PasteMethod::CtrlV;
+        // Use clipboard paste for all platforms to avoid keyboard layout issues
+        // Direct typing simulates keypresses which depend on current keyboard layout
+        PasteMethod::CtrlV
     }
 }
 
@@ -430,6 +428,24 @@ pub struct AppSettings {
     pub whisper_gpu_device: i32,
     #[serde(default)]
     pub extra_recording_buffer_ms: u64,
+    #[serde(default = "default_wake_word_enabled")]
+    pub wake_word_enabled: bool,
+    #[serde(default = "default_wake_word_phrase")]
+    pub wake_word_phrase: String,
+    #[serde(default = "default_wake_word_stop_phrase")]
+    pub wake_word_stop_phrase: String,
+}
+
+fn default_wake_word_enabled() -> bool {
+    false
+}
+
+fn default_wake_word_phrase() -> String {
+    "hey handy".to_string()
+}
+
+fn default_wake_word_stop_phrase() -> String {
+    "stop recording".to_string()
 }
 
 fn default_model() -> String {
@@ -804,6 +820,9 @@ pub fn get_default_settings() -> AppSettings {
         ort_accelerator: OrtAcceleratorSetting::default(),
         whisper_gpu_device: default_whisper_gpu_device(),
         extra_recording_buffer_ms: 0,
+        wake_word_enabled: false,
+        wake_word_phrase: default_wake_word_phrase(),
+        wake_word_stop_phrase: default_wake_word_stop_phrase(),
     }
 }
 

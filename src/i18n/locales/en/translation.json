@@ -251,6 +251,21 @@
         "label": "Keep Mic Open Between Transcriptions",
         "description": "Keeps the microphone stream open for 30 seconds after recording stops, reducing latency for back-to-back transcriptions. May degrade Bluetooth audio quality while active."
       },
+      "wakeWord": {
+        "label": "Wake Word Detection",
+        "description": "Automatically start or stop recording when a phrase is detected. Requires a transcription model to be loaded.",
+        "requiresAlwaysOn": "Requires Always-On Microphone to be enabled.",
+        "voiceBarLabel": "Voice Detection",
+        "audioDetected": "Audio detected",
+        "listening": "Listening...",
+        "startPhraseLabel": "Start Phrase",
+        "startPhraseDescription": "Say this phrase to start recording. Default: \"hey handy\".",
+        "startPhrasePlaceholder": "e.g. hey handy",
+        "stopPhraseLabel": "Stop Phrase",
+        "stopPhraseDescription": "Say this phrase while recording to stop and transcribe. Default: \"stop recording\".",
+        "stopPhrasePlaceholder": "e.g. stop recording",
+        "detected": "Wake word detected"
+      },
       "acceleration": {
         "whisper": {
           "title": "Whisper Acceleration",

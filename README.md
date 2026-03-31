@@ -1,10 +1,52 @@
-# Handy
+# HandyVTT — Handy with Voice-Triggered Transcription
 
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
 
+> **This is a fork of [Handy](https://github.com/cjpais/Handy) extended with hands-free, wake-word-triggered transcription.**
+
 **A free, open source, and extensible speech-to-text application that works completely offline.**
 
-Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
+---
+
+## ✨ What's New in This Fork: Wake Word Detection
+
+This fork adds **always-on, hands-free voice activation** — no keyboard shortcut needed.
+
+### How it works
+
+1. Enable **Always-On Microphone** and **Wake Word Detection** in Settings → Audio
+2. Say your configured start phrase (default: **"hey handy"**)
+3. Handy starts transcribing and typing directly to your cursor — continuously, in segments
+4. Say your stop phrase (default: **"stop recording"**) to return to listening mode
+
+```
+Listening → [hear "hey handy"] → Recording/Transcribing → [hear "stop recording"] → Listening
+```
+
+### Features & fixes included
+
+| Area | Change |
+|------|--------|
+| Wake word state machine | Full WaitingForWake → Recording → WaitingForWake loop with segment-based dictation |
+| False trigger reduction | VAD onset raised to 120 ms + speech-energy gate — rejects brief noise bursts |
+| Audio quality | Reverted Qwen's degraded VAD parameters (threshold 0.3, 15/15 smoothing frames) |
+| Multilingual typing (Linux) | `xdotool` now uses Unicode keysym format for non-ASCII text — fixes spaces being typed for Cyrillic/Ukrainian/etc. on X11 |
+| Tray tooltip | Shows current state: **Idle / Listening / Recording / Transcribing** |
+| Bluetooth HFP | Removed stream open/close cycle that caused BT headphones to thrash between A2DP↔HFP |
+| Initialization race | Wake word thread now starts only after TrayIcon is registered — fixes silent crash on startup |
+
+### Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Always-On Microphone | off | Required for wake word mode |
+| Wake Word Detection | off | Enable/disable the feature |
+| Start Phrase | `hey handy` | Phrase to begin transcribing |
+| Stop Phrase | `stop recording` | Phrase to stop and return to listening |
+
+> **Bluetooth note:** Any open microphone stream causes Linux to switch BT headphones from A2DP to HFP (hands-free, lower quality). This is a PipeWire/PulseAudio system-level behaviour — not fixable in the app. Use a wired/USB mic for wake word mode if audio quality matters.
+
+---
 
 ## Why Handy?
 

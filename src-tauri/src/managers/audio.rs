@@ -123,7 +123,12 @@ fn create_audio_recorder(
 ) -> Result<AudioRecorder, anyhow::Error> {
     let silero = SileroVad::new(vad_path, 0.3)
         .map_err(|e| anyhow::anyhow!("Failed to create SileroVad: {}", e))?;
-    let smoothed_vad = SmoothedVad::new(Box::new(silero), 15, 15, 2);
+    // onset_frames=4 requires 4 consecutive voice frames (120 ms) before
+    // triggering.  This filters brief transient noises (clicks, keyboard,
+    // door slams) that easily satisfy the old 2-frame (60 ms) threshold.
+    // The prefill (15 frames = 450 ms) still captures audio before onset,
+    // so the start of speech is not clipped.
+    let smoothed_vad = SmoothedVad::new(Box::new(silero), 15, 15, 4);
 
     // Recorder with VAD plus a spectrum-level callback that forwards updates to
     // the frontend.
@@ -382,15 +387,14 @@ impl AudioRecordingManager {
         let mut state = self.state.lock().unwrap();
 
         if let RecordingState::Idle = *state {
-            // Ensure microphone is open in on-demand mode
-            if matches!(*self.mode.lock().unwrap(), MicrophoneMode::OnDemand) {
-                // Cancel any pending lazy close
-                self.close_generation.fetch_add(1, Ordering::SeqCst);
-                if let Err(e) = self.start_microphone_stream() {
-                    let msg = format!("{e}");
-                    error!("Failed to open microphone stream: {msg}");
-                    return Err(msg);
-                }
+            // Always ensure the stream is open. In OnDemand mode this opens it;
+            // in AlwaysOn mode it is normally a no-op but handles the case where
+            // the wake-word loop closed it between captures (for Bluetooth HFP relief).
+            self.close_generation.fetch_add(1, Ordering::SeqCst);
+            if let Err(e) = self.start_microphone_stream() {
+                let msg = format!("{e}");
+                error!("Failed to open microphone stream: {msg}");
+                return Err(msg);
             }
 
             if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
