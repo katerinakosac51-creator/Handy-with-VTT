@@ -64,6 +64,18 @@ impl WakeWordManager {
     }
 }
 
+/// Lowercase and strip punctuation/special characters so that transcription
+/// output like "Hey, Handy!" still matches the configured phrase "hey handy".
+fn normalize_phrase(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_ascii_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn listen_loop(app: AppHandle, running: Arc<AtomicBool>) {
     // Kick off model loading immediately so it is ready when the wake phrase fires.
     // Without this, pure wake-word users never trigger the normal shortcut path
@@ -94,10 +106,10 @@ fn listen_loop(app: AppHandle, running: Arc<AtomicBool>) {
                 change_tray_icon(&app, TrayIconState::Listening);
 
                 if let Some(phrase) = capture_from_shared_stream(&app) {
-                    let text_lower = phrase.to_lowercase();
-                    let start_phrase = settings.wake_word_phrase.to_lowercase();
+                    let text_norm = normalize_phrase(&phrase);
+                    let start_phrase = normalize_phrase(&settings.wake_word_phrase);
 
-                    if text_lower.contains(&start_phrase) {
+                    if text_norm.contains(&start_phrase) {
                         state = ListenState::Recording;
                         change_tray_icon(&app, TrayIconState::Recording);
                         // Snapshot history before starting so we detect only new entries.
@@ -126,7 +138,7 @@ fn listen_loop(app: AppHandle, running: Arc<AtomicBool>) {
                 // Stop this segment — transcription + cursor output happens asynchronously.
                 stop_transcription(&app);
 
-                let stop_phrase = settings.wake_word_stop_phrase.to_lowercase();
+                let stop_phrase = normalize_phrase(&settings.wake_word_stop_phrase);
                 let new_text =
                     wait_for_new_transcription(&app, last_history_id, TRANSCRIPTION_TIMEOUT);
 
@@ -134,7 +146,7 @@ fn listen_loop(app: AppHandle, running: Arc<AtomicBool>) {
                 last_history_id = get_latest_history_id(&app);
 
                 let found_stop = new_text
-                    .map(|t| t.to_lowercase().contains(&stop_phrase))
+                    .map(|t| normalize_phrase(&t).contains(&stop_phrase))
                     .unwrap_or(false);
 
                 if found_stop {
@@ -142,8 +154,11 @@ fn listen_loop(app: AppHandle, running: Arc<AtomicBool>) {
                     change_tray_icon(&app, TrayIconState::Listening);
                 } else if running.load(Ordering::SeqCst) {
                     // Continue dictation: start the next segment.
-                    start_transcription(&app);
-                    std::thread::sleep(Duration::from_millis(300));
+                    // The coordinator may still be in Processing state because
+                    // wait_for_new_transcription returns after history save but
+                    // before the paste operation and ProcessingFinished arrive.
+                    // Retry until recording actually starts.
+                    start_transcription_with_retry(&app, &running);
                 }
             }
         }
@@ -245,13 +260,44 @@ fn transcribe_snippet(app: &AppHandle, audio: Vec<f32>) -> Option<String> {
 fn start_transcription(app: &AppHandle) {
     let _ = app.emit("wake-word-detected", ());
     if let Some(coordinator) = app.try_state::<TranscriptionCoordinator>() {
-        coordinator.send_input("transcribe", "wake-word", true, false);
+        // push_to_talk=true, is_pressed=true: starts only when Idle, ignored otherwise.
+        coordinator.send_input("transcribe", "wake-word", true, true);
+    }
+}
+
+/// Start transcription and retry until the coordinator accepts the request.
+///
+/// `wait_for_new_transcription` returns as soon as the history entry is saved,
+/// but the TranscriptionCoordinator stays in `Processing` state until the paste
+/// operation finishes. Calling `send_input` while the coordinator is `Processing`
+/// silently drops the request. This function retries every 100 ms until the
+/// audio manager confirms that recording has actually started.
+fn start_transcription_with_retry(app: &AppHandle, running: &Arc<AtomicBool>) {
+    let _ = app.emit("wake-word-detected", ());
+
+    let Some(coordinator) = app.try_state::<TranscriptionCoordinator>() else {
+        return;
+    };
+    let Some(audio_manager) = app.try_state::<Arc<AudioRecordingManager>>() else {
+        return;
+    };
+
+    for _ in 0..20 {
+        if !running.load(Ordering::SeqCst) {
+            return;
+        }
+        coordinator.send_input("transcribe", "wake-word", true, true);
+        std::thread::sleep(Duration::from_millis(100));
+        if audio_manager.is_recording() {
+            return;
+        }
     }
 }
 
 /// Stop the active transcription recording (triggers transcription + cursor output).
 fn stop_transcription(app: &AppHandle) {
     if let Some(coordinator) = app.try_state::<TranscriptionCoordinator>() {
-        coordinator.send_input("transcribe", "wake-word", true, false);
+        // push_to_talk=true, is_pressed=false: stops only when Recording, ignored otherwise.
+        coordinator.send_input("transcribe", "wake-word", false, true);
     }
 }

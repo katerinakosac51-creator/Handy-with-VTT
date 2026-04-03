@@ -52,6 +52,20 @@ struct TranscribeAction {
 /// Field name for structured output JSON schema
 const TRANSCRIPTION_FIELD: &str = "transcription";
 
+/// Remove the wake-word stop phrase from the end of a transcription string so
+/// it is not typed at the cursor. Matching is case-insensitive; everything from
+/// the last occurrence of the stop phrase onwards is dropped and the result is
+/// trimmed. If the phrase is not found the original text is returned unchanged.
+fn strip_wake_stop_phrase(text: &str, stop_phrase: &str) -> String {
+    let text_lower = text.to_lowercase();
+    let phrase_lower = stop_phrase.to_lowercase();
+    if let Some(pos) = text_lower.rfind(&phrase_lower) {
+        text[..pos].trim_end().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
 /// Strip invisible Unicode characters that some LLMs may insert
 fn strip_invisible_chars(s: &str) -> String {
     s.replace(['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'], "")
@@ -464,7 +478,7 @@ impl ShortcutAction for TranscribeAction {
         );
     }
 
-    fn stop(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
+    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str) {
         // Unregister the cancel shortcut when transcription stops
         shortcut::unregister_cancel_shortcut(app);
 
@@ -486,6 +500,7 @@ impl ShortcutAction for TranscribeAction {
         play_feedback_sound(app, SoundType::Stop);
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
+        let shortcut_str = shortcut_str.to_string();
         let post_process = self.post_process;
 
         tauri::async_runtime::spawn(async move {
@@ -561,6 +576,23 @@ impl ShortcutAction for TranscribeAction {
                                 process_transcription_output(&ah, &transcription, post_process)
                                     .await;
 
+                            // Strip the stop phrase from the output when triggered by
+                            // the wake-word path so it doesn't appear at the cursor.
+                            // History always stores the original transcription.
+                            let final_text = if shortcut_str == "wake-word" {
+                                let s = get_settings(&ah);
+                                if s.wake_word_enabled && !s.wake_word_stop_phrase.is_empty() {
+                                    strip_wake_stop_phrase(
+                                        &processed.final_text,
+                                        &s.wake_word_stop_phrase,
+                                    )
+                                } else {
+                                    processed.final_text
+                                }
+                            } else {
+                                processed.final_text
+                            };
+
                             // Save to history if WAV was saved
                             if wav_saved {
                                 if let Err(err) = hm.save_entry(
@@ -574,13 +606,12 @@ impl ShortcutAction for TranscribeAction {
                                 }
                             }
 
-                            if processed.final_text.is_empty() {
+                            if final_text.is_empty() {
                                 utils::hide_recording_overlay(&ah);
                                 change_tray_icon(&ah, TrayIconState::Idle);
                             } else {
                                 let ah_clone = ah.clone();
                                 let paste_time = Instant::now();
-                                let final_text = processed.final_text;
                                 ah.run_on_main_thread(move || {
                                     match utils::paste(final_text, ah_clone.clone()) {
                                         Ok(()) => debug!(

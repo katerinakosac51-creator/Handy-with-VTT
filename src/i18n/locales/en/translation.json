@@ -257,6 +257,7 @@
         "requiresAlwaysOn": "Requires Always-On Microphone to be enabled.",
         "voiceBarLabel": "Voice Detection",
         "audioDetected": "Audio detected",
+        "listeningForPhrase": "Listening for phrase...",
         "listening": "Listening...",
         "startPhraseLabel": "Start Phrase",
         "startPhraseDescription": "Say this phrase to start recording. Default: \"hey handy\".",
